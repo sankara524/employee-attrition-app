@@ -1,10 +1,10 @@
-# Employee Attrition Predictor
+# Employee Attrition Prediction System
 
-Streamlit app that predicts whether an employee will leave, using 8 trained models.
+Streamlit app that predicts whether an employee will (Stay/Leave), using 8 trained machine learning models.
 
 ## Folder layout
 ```
-attrition-app/
+Employee-Attrition-app/
 ├── app.py
 ├── requirements.txt
 └── models/
@@ -17,6 +17,11 @@ attrition-app/
     ├── Employee_Attrition_Decision_Tree_Model.pkl
     └── Employee_Attrition_Naive_Bayes_Model.pkl
 ```
+## Tech Stack
+Python, Pandas, scikit-learn, Streamlit
+
+# Dataset
+Employee Attrition dataset(59,598 records, 24 columns).
 
 ## Run locally
 ```
