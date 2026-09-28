@@ -3,6 +3,7 @@ warnings.filterwarnings("ignore")
 
 from pathlib import Path
 
+import altair as alt
 import joblib
 import pandas as pd
 import streamlit as st
@@ -91,6 +92,54 @@ def get_feature_importance() -> pd.Series:
         )
         totals[original] = totals.get(original, 0.0) + float(value)
     return pd.Series(totals).sort_values(ascending=False)
+
+
+def probability_chart(valid: pd.DataFrame) -> alt.Chart:
+    """Horizontal bars sorted by probability, fixed 0-100% axis, red = Leave, green = Stay."""
+    data = valid[["Model", "Probability of leaving"]].rename(columns={"Probability of leaving": "Probability"})
+    data["Outcome"] = data["Probability"].apply(lambda p: "Leave" if p >= 0.5 else "Stay")
+
+    x = alt.X(
+        "Probability:Q",
+        scale=alt.Scale(domain=[0, 1.12]),  # a little room so the labels are never clipped
+        axis=alt.Axis(format="%", values=[0, 0.25, 0.5, 0.75, 1.0], title="Probability of leaving"),
+    )
+    order = data.sort_values("Probability", ascending=False)["Model"].tolist()
+    y = alt.Y("Model:N", sort=order, title=None)
+
+    bars = alt.Chart(data).mark_bar().encode(
+        x=x,
+        y=y,
+        color=alt.Color(
+            "Outcome:N",
+            scale=alt.Scale(domain=["Leave", "Stay"], range=["#ff4b4b", "#21c354"]),
+            legend=alt.Legend(title=None, orient="bottom"),
+        ),
+        tooltip=["Model", alt.Tooltip("Probability:Q", format=".1%"), "Outcome"],
+    )
+    labels = alt.Chart(data).mark_text(align="left", dx=5, color="#fafafa").encode(
+        x=alt.X("Probability:Q"), y=y, text=alt.Text("Probability:Q", format=".1%")
+    )
+    threshold = alt.Chart(pd.DataFrame({"x": [0.5]})).mark_rule(
+        strokeDash=[5, 5], color="#fafafa", opacity=0.6
+    ).encode(x=alt.X("x:Q"))
+    return (bars + labels + threshold).properties(height=alt.Step(34))
+
+
+def importance_chart(top: pd.Series) -> alt.Chart:
+    """Horizontal bars sorted from most to least important, shown as a share of the total."""
+    data = top.rename("Importance").rename_axis("Feature").reset_index()
+    order = data.sort_values("Importance", ascending=False)["Feature"].tolist()
+    y = alt.Y("Feature:N", sort=order, title=None)
+    bars = alt.Chart(data).mark_bar(color="#4c9be8").encode(
+        x=alt.X("Importance:Q", axis=alt.Axis(format="%", title="Share of total importance")),
+        y=y,
+        tooltip=["Feature", alt.Tooltip("Importance:Q", format=".1%")],
+    )
+    labels = alt.Chart(data).mark_text(align="left", dx=5, color="#fafafa").encode(
+        x=alt.X("Importance:Q"), y=y, text=alt.Text("Importance:Q", format=".1%")
+    )
+    return (bars + labels).properties(height=alt.Step(30))
 
 
 # ---------------- Sidebar ----------------
@@ -209,7 +258,8 @@ if submitted:
                 hide_index=True,
                 width="stretch",
             )
-            st.bar_chart(valid.set_index("Model")["Probability of leaving"], horizontal=True)
+            st.altair_chart(probability_chart(valid), width="stretch")
+            st.caption("Dashed line = 50% decision threshold. Red bars predict Leave, green bars predict Stay.")
     except FileNotFoundError as e:
         st.error(f"Model file not found in models/ folder: {e}")
     except Exception as e:
@@ -227,6 +277,6 @@ with st.expander("🔍 What drives employee attrition? (feature importance)"):
     try:
         importance = get_feature_importance()
         top = importance.head(10).rename("Importance")
-        st.bar_chart(top, horizontal=True)
+        st.altair_chart(importance_chart(top), width="stretch")
     except Exception as e:
         st.info(f"Feature importance is not available: {e}")
