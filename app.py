@@ -105,7 +105,7 @@ def probability_chart(valid: pd.DataFrame) -> alt.Chart:
         axis=alt.Axis(format="%", values=[0, 0.25, 0.5, 0.75, 1.0], title="Probability of leaving"),
     )
     order = data.sort_values("Probability", ascending=False)["Model"].tolist()
-    y = alt.Y("Model:N", sort=order, title=None)
+    y = alt.Y("Model:N", sort=order, title=None, axis=alt.Axis(labelLimit=260))
 
     bars = alt.Chart(data).mark_bar().encode(
         x=x,
@@ -130,7 +130,7 @@ def importance_chart(top: pd.Series) -> alt.Chart:
     """Horizontal bars sorted from most to least important, shown as a share of the total."""
     data = top.rename("Importance").rename_axis("Feature").reset_index()
     order = data.sort_values("Importance", ascending=False)["Feature"].tolist()
-    y = alt.Y("Feature:N", sort=order, title=None)
+    y = alt.Y("Feature:N", sort=order, title=None, axis=alt.Axis(labelLimit=260))
     bars = alt.Chart(data).mark_bar(color="#4c9be8").encode(
         x=alt.X("Importance:Q", axis=alt.Axis(format="%", title="Share of total importance")),
         y=y,
