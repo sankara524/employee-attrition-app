@@ -15,7 +15,7 @@ MODEL_DIR = Path(__file__).parent / "models"
 MODELS = {
     "Random Forest": "Employee_Attrition_Random_Forest_Model.pkl",
     "Gradient Boosting": "Employee_Attrition_Gradient_Boosting_Model.pkl",
-    "XGBoost": "Employee_Attrition_XGBoost_Model.pkl",
+    "XGBoost": "Employee_Attrition_XGBoost_Model.pkl",  # actually loaded from preprocessor .pkl + booster .json (see load_model)
     "SVM": "Employee_Attrition_SVM_Model.pkl",
     "Logistic Regression": "Employee_Attrition_Logistic_Regression_Model.pkl",
     "KNN": "Employee_Attrition_KNN_Model.pkl",
@@ -57,11 +57,48 @@ def predict(model, model_name: str, row: pd.DataFrame):
     return label, p_left
 
 
+CATEGORICAL = [
+    "Gender", "Job Role", "Work-Life Balance", "Job Satisfaction", "Performance Rating",
+    "Overtime", "Education Level", "Marital Status", "Job Level", "Company Size",
+    "Remote Work", "Leadership Opportunities", "Innovation Opportunities",
+    "Company Reputation", "Employee Recognition",
+]
+
+
+def compare_all_models(row: pd.DataFrame) -> pd.DataFrame:
+    """Run every model on the same input and collect prediction + probability."""
+    results = []
+    for name, file_name in MODELS.items():
+        try:
+            label, p_left = predict(load_model(file_name), name, row)
+            results.append({"Model": name, "Prediction": label, "Probability of leaving": p_left})
+        except Exception as e:  # keep going if one model fails
+            results.append({"Model": name, "Prediction": f"error: {e}", "Probability of leaving": None})
+    return pd.DataFrame(results)
+
+
+@st.cache_data(show_spinner="Calculating feature importance...")
+def get_feature_importance() -> pd.Series:
+    """Random Forest importance, with one-hot columns summed back to the original feature."""
+    pipe = load_model(MODELS["Random Forest"])
+    pre, rf = pipe.steps[0][1], pipe.steps[-1][1]
+    totals = {}
+    for col_name, value in zip(pre.get_feature_names_out(), rf.feature_importances_):
+        base = col_name.split("__", 1)[1]
+        original = next(
+            (c for c in sorted(CATEGORICAL, key=len, reverse=True) if base.startswith(c + "_")),
+            base,
+        )
+        totals[original] = totals.get(original, 0.0) + float(value)
+    return pd.Series(totals).sort_values(ascending=False)
+
+
 # ---------------- Sidebar ----------------
 st.sidebar.title("Settings")
 model_name = st.sidebar.selectbox("Choose a model", list(MODELS.keys()))
-if model_name in ("KNN", "SVM"):
-    st.sidebar.info(f"{model_name} can take a few seconds to predict.")
+compare = st.sidebar.checkbox("Also compare all 8 models", value=True)
+if model_name in ("KNN", "SVM") or compare:
+    st.sidebar.info("KNN and SVM can take a few seconds the first time.")
 
 # ---------------- Main form ----------------
 st.title("👥 Employee Attrition Predictor")
@@ -146,7 +183,50 @@ if submitted:
         if p_left is not None:
             st.metric("Probability of leaving", f"{p_left:.1%}")
             st.progress(min(max(p_left, 0.0), 1.0))
-    except FileNotFoundError:
-        st.error(f"Model file not found: models/{MODELS[model_name]}")
+
+        if compare:
+            st.divider()
+            st.subheader("📊 All models compared")
+            with st.spinner("Running all 8 models..."):
+                table = compare_all_models(row)
+
+            valid = table.dropna(subset=["Probability of leaving"])
+            n_leave = int((valid["Prediction"] == "Left").sum())
+            m1, m2 = st.columns(2)
+            m1.metric("Models predicting LEAVE", f"{n_leave} of {len(valid)}")
+            m2.metric("Average probability of leaving", f"{valid['Probability of leaving'].mean():.1%}")
+
+            if n_leave > len(valid) / 2:
+                st.error("Majority vote: this employee is likely to **LEAVE**.")
+            elif n_leave < len(valid) / 2:
+                st.success("Majority vote: this employee is likely to **STAY**.")
+            else:
+                st.warning("The models are split evenly on this employee.")
+
+            st.dataframe(
+                table.assign(**{"Probability of leaving": table["Probability of leaving"].map(
+                    lambda v: f"{v:.1%}" if pd.notna(v) else "n/a")}),
+                hide_index=True,
+                width="stretch",
+            )
+            st.bar_chart(valid.set_index("Model")["Probability of leaving"], horizontal=True)
+    except FileNotFoundError as e:
+        st.error(f"Model file not found in models/ folder: {e}")
     except Exception as e:
         st.error(f"Prediction failed: {e}")
+
+
+# ---------------- Feature importance ----------------
+st.divider()
+with st.expander("🔍 What drives employee attrition? (feature importance)"):
+    st.write(
+        "Which employee and workplace factors matter most in the Random Forest model "
+        "across the whole dataset. Higher means more influence on the prediction. "
+        "This is a general view, not an explanation of the single employee above."
+    )
+    try:
+        importance = get_feature_importance()
+        top = importance.head(10).rename("Importance")
+        st.bar_chart(top, horizontal=True)
+    except Exception as e:
+        st.info(f"Feature importance is not available: {e}")
